@@ -46,11 +46,9 @@ BATCH_SIZE = 30
 
 DB_NAME = "bot_data.db"
 
-# Redis Config
-REDIS_HOST = 'localhost'
-REDIS_PORT = 6379
-REDIS_DB = 0
 
+REDIS_URL = os.environ.get("REDIS_URL")
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 
 # =====================
 # Redis Message Queue (Only for messages)
