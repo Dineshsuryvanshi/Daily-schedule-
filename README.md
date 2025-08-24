@@ -21,7 +21,7 @@ This is a Telegram bot for auto-scheduling and forwarding messages/media to mult
 1. **Clone the repository**
 
 
-git clone https://github.com/yourusername/yourrepo.git
+https://github.com/Dineshsuryvanshi/Daily-schedule-/tree/main
 cd yourrepo
 
 
