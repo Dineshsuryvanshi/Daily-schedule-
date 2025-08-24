@@ -60,11 +60,17 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 # =====================
 class MessageQueue:
     def __init__(self):
-        # Render/Termux के Environment Variable से URL लें
         redis_url = os.environ.get("REDIS_URL")
         if not redis_url:
-            # अगर URL नहीं मिला तो एरर दें ताकि बॉट क्रैश हो और आपको पता चले
-            raise ValueError("REDIS_URL environment variable is not set. Please set it in Render.")
+            raise ValueError("REDIS_URL environment variable is not set.")
+        
+        # ssl_cert_reqs='required' को जोड़कर SSL को强制 करें
+        self.redis_client = redis.from_url(
+            redis_url, 
+            decode_responses=False,
+            ssl_cert_reqs='required'
+        )
+
         
         # URL से Redis क्लाइंट बनाएं (decode_responses को False रखें क्योंकि आप pickle का उपयोग कर रहे हैं)
         self.redis_client = redis.from_url(redis_url, decode_responses=False)
