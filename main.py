@@ -64,11 +64,11 @@ class MessageQueue:
         if not redis_url:
             raise ValueError("REDIS_URL environment variable is not set.")
         
-        # ssl_cert_reqs='required' को जोड़कर SSL को强制 करें
+        # SSL/TLS सेटिंग्स को स्पष्ट करें और सर्टिफिकेट वेरिफिकेशन को डिसेबल करें
         self.redis_client = redis.from_url(
             redis_url, 
-            decode_responses=False,
-            ssl_cert_reqs='required'
+            ssl_cert_reqs=None,  # यह लाइन SSL एरर को ठीक करेगी
+            decode_responses=False # pickle के लिए इसे False ही रखें
         )
 
         
