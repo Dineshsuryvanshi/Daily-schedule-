@@ -35,10 +35,15 @@ logger = logging.getLogger(__name__)
 # =====================
 # Config
 # =====================
-TOKEN = "8321548453:AAFIwK0EmuSirYn8HHd2Yr0vKMgZdyRHwXo"  # अपना बॉट टोकन डालें
-ADMIN_IDS = [5865209445]           # अपने Telegram User IDs
-OWNER_ID = 5865209445  # अपना ID
-IST = pytz.timezone("Asia/Kolkata")
+# नया और सुरक्षित तरीका
+TOKEN = os.environ.get("BOT_TOKEN")
+OWNER_ID = int(os.environ.get("OWNER_ID", 0))
+ADMIN_IDS = [int(admin_id) for admin_id in os.environ.get("ADMIN_IDS", "").split(',') if admin_id]
+
+# अगर TOKEN या OWNER_ID नहीं मिला तो बॉट को क्रैश कर दें
+if not TOKEN or not OWNER_ID:
+    raise ValueError("BOT_TOKEN and OWNER_ID environment variables must be set.")
+
 
 MAX_CHANNELS_PER_BUTTON = 20
 MAX_TIMES_PER_BUTTON = 11
@@ -55,7 +60,15 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 # =====================
 class MessageQueue:
     def __init__(self):
-        self.redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+        # Render/Termux के Environment Variable से URL लें
+        redis_url = os.environ.get("REDIS_URL")
+        if not redis_url:
+            # अगर URL नहीं मिला तो एरर दें ताकि बॉट क्रैश हो और आपको पता चले
+            raise ValueError("REDIS_URL environment variable is not set. Please set it in Render.")
+        
+        # URL से Redis क्लाइंट बनाएं (decode_responses को False रखें क्योंकि आप pickle का उपयोग कर रहे हैं)
+        self.redis_client = redis.from_url(redis_url, decode_responses=False)
+
 
     def enqueue(self, button_id: str, message_data: dict):
         """
