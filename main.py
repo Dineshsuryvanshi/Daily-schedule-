@@ -558,7 +558,6 @@ for t in times:
     except (ValueError, IndexError):
         logger.warning(f"Invalid time format found: {t}. Skipping.")
         continue # अगर टाइम फॉर्मेट गलत है तो अगले पर जाएं
-
 if created > 0:
     await query.edit_message_text(f"✅ फॉरवर्डिंग शुरू! {created} टाइम्स पर मैसेज भेजे जाएंगे।")
 else:
