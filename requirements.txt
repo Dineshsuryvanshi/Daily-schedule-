@@ -1,6 +1,4 @@
-python-telegram-bot[ext]>=21.0
-APScheduler>=3.10.0
-redis>=5.0.0
-httpx>=0.25.0
+python-telegram-bot[ext]
+redis
 pytz
-urllib3
+httpx
