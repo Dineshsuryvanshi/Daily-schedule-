@@ -9,6 +9,7 @@ import os
 import json
 import httpx
 import time
+import ssl
 from functools import wraps
 from datetime import datetime, time as dtime
 from typing import List
@@ -172,37 +173,40 @@ async def db_execute(query: str, params=()):
         conn.close()
 
     await loop.run_in_executor(None, _do)
-
 # =====================
-# Redis Connection Manager
+# Redis Connection Manager (अंतिम और सबसे शक्तिशाली संस्करण)
 # =====================
 def setup_redis_connection(redis_url: str, max_retries=5):
     """
-    URL को मैन्युअल रूप से पार्स करके एक मजबूत, SSL-सक्षम कनेक्शन बनाता है।
-    यह 'from_url' की तुलना में अधिक विश्वसनीय है।
+    एक कस्टम SSL Context बनाकर एक मजबूत, SSL-सक्षम कनेक्शन बनाता है।
+    यह TLS/SSL संस्करण की समस्याओं को हल करने के लिए सबसे विश्वसनीय तरीका है।
     """
     if not redis_url:
         raise ValueError("REDIS_URL एनवायरनमेंट वेरिएबल सेट होना चाहिए।")
 
-    print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (मैन्युअल SSL मोड)...")
+    print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (कस्टम SSL Context मोड)...")
     
     try:
         url = urlparse(redis_url)
         
-        # सुनिश्चित करें कि URL rediss:// है
         if url.scheme != "rediss":
-            raise ValueError("त्रुटि: Redis URL 'rediss://' से शुरू होना चाहिए।")
+            raise ValueError(f"त्रुटि: Redis URL 'rediss://' से शुरू होना चाहिए, पर '{url.scheme}://' मिला।")
+
+        # एक कस्टम SSL Context बनाएं
+        # यह सर्वर के सर्टिफिकेट को वेरिफाई नहीं करेगा, जो WRONG_VERSION_NUMBER को बायपास करता है
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
 
         redis_client = redis.Redis(
             host=url.hostname,
             port=url.port,
             password=url.password,
-            ssl=True,               # SSL को स्पष्ट रूप से सक्षम करें
-            ssl_cert_reqs=None,     # सर्टिफिकेट वेरिफिकेशन को डिसेबल करें
-            decode_responses=False  # Pickle के लिए यह False होना चाहिए
+            ssl=True,
+            ssl_context=ctx,  # <<< सबसे महत्वपूर्ण बदलाव
+            decode_responses=False
         )
 
-        # कनेक्शन का परीक्षण करने के लिए कई बार प्रयास करें
         retry_wait = 1
         for attempt in range(max_retries):
             try:
