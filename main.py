@@ -53,23 +53,50 @@ DB_NAME = "bot_data.db"
 
 
 REDIS_URL = os.environ.get("REDIS_URL")
-redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+
 
 # =====================
 # Redis Message Queue (Only for messages)
 # =====================
+# =====================
+# Redis Message Queue (Only for messages)
+# =====================
 class MessageQueue:
-    def __init__(self):
-        redis_url = os.environ.get("REDIS_URL")
-        if not redis_url:
-            raise ValueError("REDIS_URL environment variable is not set.")
-        
-        # SSL/TLS सेटिंग्स को स्पष्ट करें और सर्टिफिकेट वेरिफिकेशन को डिसेबल करें
-        self.redis_client = redis.from_url(
-            redis_url, 
-            ssl_cert_reqs=None,  # यह लाइन SSL एरर को ठीक करेगी
-            decode_responses=False # pickle के लिए इसे False ही रखें
-        )
+    def __init__(self, redis_client):
+        """
+        Accepts an already connected redis client.
+        """
+        self.redis_client = redis_client
+
+    def enqueue(self, button_id: str, message_data: dict):
+        """
+        Add a message to queue: lpush (left push), we will pop from right for FIFO.
+        """
+        key = f"queue:{button_id}"
+        # हम pickle का उपयोग कर रहे हैं, इसलिए डेटा बाइनरी होना चाहिए
+        self.redis_client.lpush(key, pickle.dumps(message_data))
+
+    def dequeue_batch(self, button_id: str, batch_size: int) -> List[dict]:
+        """
+        Pop up to batch_size messages in FIFO order from Redis.
+        """
+        key = f"queue:{button_id}"
+        messages = []
+        for _ in range(batch_size):
+            raw = self.redis_client.rpop(key)
+            if not raw:
+                break
+            # बाइनरी डेटा को वापस ऑब्जेक्ट में बदलें
+            messages.append(pickle.loads(raw))
+        return messages
+
+    def queue_size(self, button_id: str) -> int:
+        key = f"queue:{button_id}"
+        return int(self.redis_client.llen(key))
+
+# अभी message_queue को यहां initialize न करें, हम इसे main() में करेंगे
+# message_queue = MessageQueue() <--- इस लाइन को भी हटाएं या कमेंट कर दें
+
 
         
         # URL से Redis क्लाइंट बनाएं (decode_responses को False रखें क्योंकि आप pickle का उपयोग कर रहे हैं)
@@ -173,6 +200,48 @@ async def db_execute(query: str, params=()):
         conn.close()
 
     await loop.run_in_executor(None, _do)
+
+# =====================
+# Redis Connection Manager
+# =====================
+def setup_redis_connection(redis_url: str, max_retries=5):
+    """
+    Establishes a robust, SSL-enabled connection to Redis with retries.
+    Returns a redis client instance or raises an exception after all retries fail.
+    """
+    if not redis_url:
+        raise ValueError("REDIS_URL environment variable must be set.")
+
+    # decode_responses को False रखना है क्योंकि हम pickle का उपयोग कर रहे हैं
+    # जो बाइनरी डेटा स्टोर करता है।
+    redis_kwargs = {
+        'decode_responses': False,
+        'ssl_cert_reqs': None  # यह SSL एरर को ठीक करता है
+    }
+
+    print("Attempting to connect to Redis...")
+    retry_wait = 1
+    for attempt in range(max_retries):
+        try:
+            # from_url SSL सेटिंग्स को अपने आप हैंडल कर लेता है अगर URL 'rediss://' से शुरू होता है
+            # और हम अतिरिक्त kwargs भी पास कर सकते हैं।
+            redis_client = redis.from_url(redis_url, **redis_kwargs)
+            redis_client.ping()
+            print("✅ Redis connection successful!")
+            return redis_client
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+            print(f"⚠️ Redis connection attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {retry_wait} seconds...")
+                time.sleep(retry_wait)
+                retry_wait = min(retry_wait * 2, 30) # Exponential backoff
+        except Exception as e:
+            # अन्य किसी भी एरर के लिए तुरंत बाहर निकलें
+            print(f"❌ An unexpected error occurred while connecting to Redis: {e}")
+            raise e
+
+    raise ConnectionError("❌ Failed to connect to Redis after multiple retries.")
+
 
 
 # =====================
@@ -873,7 +942,20 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 # =====================
 def main() -> None:
     init_db()
+    # 1. Redis से कनेक्ट करें
+    try:
+        REDIS_URL = os.environ.get("REDIS_URL")
+        redis_client = setup_redis_connection(REDIS_URL)
+    except Exception as e:
+        logger.critical(f"Could not connect to Redis. Bot is shutting down. Error: {e}")
+        return # Redis के बिना बॉट नहीं चलेगा
 
+    # 2. MessageQueue को Redis क्लाइंट के साथ बनाएं
+    global message_queue
+    message_queue = MessageQueue(redis_client)
+    # --- बदलाव समाप्त ---
+
+    
     app = Application.builder().token(TOKEN).pool_timeout(60).connect_timeout(60).read_timeout(60).build()
 
     # UI handlers
