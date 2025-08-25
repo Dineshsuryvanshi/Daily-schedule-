@@ -178,42 +178,49 @@ async def db_execute(query: str, params=()):
 # =====================
 def setup_redis_connection(redis_url: str, max_retries=5):
     """
-    Establishes a robust, SSL-enabled connection to Redis with retries.
-    Returns a redis client instance or raises an exception after all retries fail.
+    URL को मैन्युअल रूप से पार्स करके एक मजबूत, SSL-सक्षम कनेक्शन बनाता है।
+    यह 'from_url' की तुलना में अधिक विश्वसनीय है।
     """
     if not redis_url:
-        raise ValueError("REDIS_URL environment variable must be set.")
+        raise ValueError("REDIS_URL एनवायरनमेंट वेरिएबल सेट होना चाहिए।")
 
-    # decode_responses को False रखना है क्योंकि हम pickle का उपयोग कर रहे हैं
-    # जो बाइनरी डेटा स्टोर करता है।
-    redis_kwargs = {
-        'decode_responses': False,
-        'ssl_cert_reqs': None  # यह SSL एरर को ठीक करता है
-    }
+    print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (मैन्युअल SSL मोड)...")
+    
+    try:
+        url = urlparse(redis_url)
+        
+        # सुनिश्चित करें कि URL rediss:// है
+        if url.scheme != "rediss":
+            raise ValueError("त्रुटि: Redis URL 'rediss://' से शुरू होना चाहिए।")
 
-    print("Attempting to connect to Redis...")
-    retry_wait = 1
-    for attempt in range(max_retries):
-        try:
-            # from_url SSL सेटिंग्स को अपने आप हैंडल कर लेता है अगर URL 'rediss://' से शुरू होता है
-            # और हम अतिरिक्त kwargs भी पास कर सकते हैं।
-            redis_client = redis.from_url(redis_url, **redis_kwargs)
-            redis_client.ping()
-            print("✅ Redis connection successful!")
-            return redis_client
-        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
-            print(f"⚠️ Redis connection attempt {attempt + 1}/{max_retries} failed: {e}")
-            if attempt < max_retries - 1:
-                print(f"Retrying in {retry_wait} seconds...")
-                time.sleep(retry_wait)
-                retry_wait = min(retry_wait * 2, 30) # Exponential backoff
-        except Exception as e:
-            # अन्य किसी भी एरर के लिए तुरंत बाहर निकलें
-            print(f"❌ An unexpected error occurred while connecting to Redis: {e}")
-            raise e
+        redis_client = redis.Redis(
+            host=url.hostname,
+            port=url.port,
+            password=url.password,
+            ssl=True,               # SSL को स्पष्ट रूप से सक्षम करें
+            ssl_cert_reqs=None,     # सर्टिफिकेट वेरिफिकेशन को डिसेबल करें
+            decode_responses=False  # Pickle के लिए यह False होना चाहिए
+        )
 
-    raise ConnectionError("❌ Failed to connect to Redis after multiple retries.")
-
+        # कनेक्शन का परीक्षण करने के लिए कई बार प्रयास करें
+        retry_wait = 1
+        for attempt in range(max_retries):
+            try:
+                redis_client.ping()
+                print("✅ Redis कनेक्शन सफल!")
+                return redis_client
+            except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+                print(f"⚠️ Redis कनेक्शन प्रयास {attempt + 1}/{max_retries} विफल: {e}")
+                if attempt < max_retries - 1:
+                    print(f"{retry_wait} सेकंड में फिर से प्रयास किया जा रहा है...")
+                    time.sleep(retry_wait)
+                    retry_wait = min(retry_wait * 2, 30)
+                else:
+                    raise ConnectionError("❌ कई प्रयासों के बाद Redis से कनेक्ट करने में विफल।")
+                    
+    except Exception as e:
+        print(f"❌ Redis कनेक्शन सेटअप करते समय एक अप्रत्याशित त्रुटि हुई: {e}")
+        raise
 
 
 # =====================
