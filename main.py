@@ -3,14 +3,10 @@ import sqlite3
 import pytz
 import re
 import asyncio
-import redis
-import pickle
 import os
 import json
 import httpx
 import time
-import ssl
-from redis.connection import SSLConnection
 from functools import wraps
 from datetime import datetime, time as dtime
 from typing import List
@@ -53,16 +49,6 @@ BATCH_SIZE = 30
 
 DB_NAME = "bot_data.db"
 
-
-REDIS_URL = os.environ.get("REDIS_URL")
-
-
-# =====================
-# Redis Message Queue (Only for messages)
-# =====================
-# =====================
-# Redis Message Queue (Only for messages)
-# =====================
 class MessageQueue:
     def __init__(self, redis_client):
         """
@@ -140,9 +126,26 @@ def init_db() -> None:
         )
     """)
 
+      # --- यहाँ नई messages टेबल जोड़ें ---
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        button_id TEXT NOT NULL,
+        content TEXT,
+        media_type TEXT NOT NULL,
+        file_id TEXT,
+        status TEXT DEFAULT 'pending' -- 'pending', 'sent'
+    )
+    """)
+    # ------------------------------------
+
     c.execute("CREATE INDEX IF NOT EXISTS idx_channels_button ON channels(button_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_schedules_button ON schedules(button_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_users_authorized ON users(is_authorized)")
+      # --- नई टेबल के लिए इंडेक्स जोड़ें ---
+    c.execute("CREATE INDEX IF NOT EXISTS idx_messages_button_status ON messages(button_id, status)")
+    # ------------------------------------
+
 
     conn.commit()
     conn.close()
@@ -265,7 +268,11 @@ def owner_only(func):
 async def get_button_status(button_id: str) -> str:
     channels = await db_fetchall("SELECT channel_id FROM channels WHERE button_id=?", (button_id,))
     schedules = await db_fetchall("SELECT schedule_time FROM schedules WHERE button_id=? ORDER BY schedule_time", (button_id,))
-    pending = message_queue.queue_size(button_id)
+    
+    # --- SQLite से पेंडिंग संदेशों की गिनती करें ---
+    pending_rows = await db_fetchall("SELECT COUNT(*) FROM messages WHERE button_id=? AND status='pending'", (button_id,))
+    pending = pending_rows[0][0] if pending_rows else 0
+    # ----------------------------------------------
 
     status = []
     status.append(f"बटन {button_id} स्टेटस:")
@@ -279,7 +286,6 @@ async def get_button_status(button_id: str) -> str:
     else:
         status.append("(कोई टाइम सेट नहीं)")
     return "\n".join(status)
-
 
 # =====================
 # Message sending with exponential backoff
@@ -337,30 +343,36 @@ async def empty_queue_reminder(context: ContextTypes.DEFAULT_TYPE):
     data = context.job.data or {}
     button_id = data.get("button_id")
     notify_chat_id = data.get("notify_chat_id")
+
     try:
-        if message_queue.queue_size(button_id) == 0:
+        # SQLite में पेंडिंग संदेशों की गिनती करें
+        pending_rows = await db_fetchall("SELECT COUNT(*) FROM messages WHERE button_id=? AND status='pending'", (button_id,))
+        pending_count = pending_rows[0][0] if pending_rows else 0
+
+        if pending_count == 0:
             await context.bot.send_message(
                 notify_chat_id,
                 f"⏰ रिमाइंडर: बटन {button_id} की मैसेज क्यू अब भी खाली है। कृपया नए मैसेज जोड़ें।"
             )
         else:
+            # अगर क्यू खाली नहीं है, तो इस रिमाइंडर जॉब को हटा दें
             context.job.schedule_removal()
+            print(f"DEBUG: Reminder for {button_id} removed as queue is no longer empty.")
+            
     except Exception as e:
         logger.error(f"empty_queue_reminder error: {e}")
-
 
 # =====================
 # Forwarding Job - uses Redis queue
 # =====================
 async def forward_messages_job(context: ContextTypes.DEFAULT_TYPE):
     """
-    यह जॉब शेड्यूल के अनुसार मैसेज फॉरवर्ड करती है और सभी स्थितियों के लिए अलर्ट भेजती है।
+    यह जॉब शेड्यूल के अनुसार SQLite से मैसेज फॉरवर्ड करती है और रिमाइंडर को मैनेज करती है।
     """
     data = context.job.data or {}
     button_id = data.get("button_id")
     notify_chat_id = data.get("notify_chat_id")
     sched_time = data.get("time")
-
     print("-" * 30)
     print(f"DEBUG: Running forward job for button_id = {button_id} at {sched_time}")
 
@@ -368,53 +380,25 @@ async def forward_messages_job(context: ContextTypes.DEFAULT_TYPE):
         # 1. चैनल प्राप्त करें
         channels_rows = await db_fetchall("SELECT channel_id FROM channels WHERE button_id=?", (button_id,))
         channels = [r[0] for r in channels_rows]
-        
-        print(f"DEBUG: Channels found for {button_id}: {channels}")
 
         if not channels:
             if notify_chat_id:
                 await context.bot.send_message(notify_chat_id, f"⚠️ {button_id}: फॉरवर्डिंग असफल! इस बटन में कोई चैनल नहीं जुड़ा है।")
             return
 
-        # 2. Redis क्यू से मैसेज निकालें
-        messages = message_queue.dequeue_batch(button_id, BATCH_SIZE)
-        
-        print(f"DEBUG: Messages found in queue for {button_id}: {len(messages)} messages")
+        # 2. SQLite से 'pending' मैसेज निकालें
+        messages_rows = await db_fetchall(
+            "SELECT id, content, media_type, file_id FROM messages WHERE button_id=? AND status='pending' ORDER BY id ASC LIMIT ?",
+            (button_id, BATCH_SIZE)
+        )
 
-        if not messages:
+        # --- यहाँ रिमाइंडर लॉजिक जोड़ें (जब कोई संदेश न मिले) ---
+        if not messages_rows:
             if notify_chat_id:
-                await context.bot.send_message(notify_chat_id, f"ℹ️ {button_id}: भेजने के लिए कोई पेंडिंग मैसेज नहीं है। कृपया नए मैसेज जोड़ें।")
+                await context.bot.send_message(notify_chat_id, f"ℹ️ {button_id}: भेजने के लिए कोई पेंडिंग मैसेज नहीं है।")
             
-            # --- यहाँ भी रिमाइंडर का लॉजिक जोड़ सकते हैं, अगर जॉब चली और क्यू पहले से खाली थी ---
+            # अगर पहले से कोई रिमाइंडर जॉब नहीं चल रही है, तो नई जॉब बनाएं
             if notify_chat_id and not context.job_queue.get_jobs_by_name(f"empty_notify_{button_id}"):
-                context.job_queue.run_repeating(
-                    empty_queue_reminder,
-                    interval=300, first=300,  # 5 मिनट
-                    name=f"empty_notify_{button_id}",
-                    data={"button_id": button_id, "notify_chat_id": notify_chat_id},
-                )
-            return
-        
-        # 3. मैसेज भेजें
-        sent_count = 0
-        for msg in messages:
-            tasks = []
-            for ch in channels:
-                tasks.append(send_message_with_backoff(context.bot, ch, msg.get("content"), msg.get("media_type"), msg.get("file_id")))
-            await asyncio.gather(*tasks)
-            sent_count += 1
-            if sent_count % 5 == 0:
-                await asyncio.sleep(1)
-        
-        # 4. सफलता का अलर्ट भेजें
-        if notify_chat_id:
-             await context.bot.send_message(notify_chat_id, f"✅ {button_id}: {sent_count} मैसेज सफलतापूर्वक फॉरवर्ड कर दिए गए।")
-
-        # 5. --- 5 मिनट का रिमाइंडर लॉजिक यहाँ जोड़ें ---
-        # अगर मैसेज भेजने के बाद क्यू खाली हो जाती है, तो रिमाइंडर सेट करें
-        if message_queue.queue_size(button_id) == 0 and notify_chat_id:
-            # अगर पहले से कोई रिमाइंडर जॉब नहीं चल रही है, तभी नई जॉब बनाएं
-            if not context.job_queue.get_jobs_by_name(f"empty_notify_{button_id}"):
                 print(f"DEBUG: Queue for {button_id} is empty. Scheduling 5-minute reminder.")
                 context.job_queue.run_repeating(
                     empty_queue_reminder,
@@ -422,12 +406,50 @@ async def forward_messages_job(context: ContextTypes.DEFAULT_TYPE):
                     name=f"empty_notify_{button_id}",
                     data={"button_id": button_id, "notify_chat_id": notify_chat_id},
                 )
+            return
+        # --------------------------------------------------------
+
+        # 3. मैसेज भेजें
+        sent_count = 0
+        sent_message_ids = []
+        for msg_id, content, media_type, file_id in messages_rows:
+            tasks = []
+            for ch in channels:
+                tasks.append(send_message_with_backoff(context.bot, ch, content, media_type, file_id))
+            await asyncio.gather(*tasks)
+            sent_count += 1
+            sent_message_ids.append(msg_id)
+            if sent_count % 5 == 0:
+                await asyncio.sleep(1)
+
+        # 4. भेजे गए संदेशों को डेटाबेस से हटाएं
+        if sent_message_ids:
+            query = f"DELETE FROM messages WHERE id IN ({','.join(['?'] * len(sent_message_ids))})"
+            await db_execute(query, tuple(sent_message_ids))
+
+        # 5. सफलता का अलर्ट भेजें
+        if notify_chat_id:
+            await context.bot.send_message(notify_chat_id, f"✅ {button_id}: {sent_count} मैसेज सफलतापूर्वक फॉरवर्ड कर दिए गए।")
+
+        # --- यहाँ रिमाइंडर लॉजिक जोड़ें (जब संदेश भेजने के बाद क्यू खाली हो जाए) ---
+        remaining_rows = await db_fetchall("SELECT COUNT(*) FROM messages WHERE button_id=? AND status='pending'", (button_id,))
+        remaining_count = remaining_rows[0][0] if remaining_rows else 0
+
+        if remaining_count == 0 and notify_chat_id:
+             if not context.job_queue.get_jobs_by_name(f"empty_notify_{button_id}"):
+                print(f"DEBUG: Queue for {button_id} is now empty. Scheduling 5-minute reminder.")
+                context.job_queue.run_repeating(
+                    empty_queue_reminder,
+                    interval=300, first=300,  # 5 मिनट
+                    name=f"empty_notify_{button_id}",
+                    data={"button_id": button_id, "notify_chat_id": notify_chat_id},
+                )
+        # --------------------------------------------------------------------
 
     except Exception as e:
         logger.exception(f"Serious error in forward job for {button_id}")
         if notify_chat_id:
             try:
-                # विफलता का अलर्ट भेजें
                 await context.bot.send_message(notify_chat_id, f"❌ {button_id}: फॉरवर्डिंग में गंभीर त्रुटि हुई: {e}")
             except Exception as ex:
                 logger.error(f"Failed to send error notification: {ex}")
@@ -797,33 +819,31 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "file_id": file_id,
     }
 
-
-
-
-
-
-    
-
-    
-
     # enqueue message once
     message_data = {
         "content": content,
         "media_type": media_type,
         "file_id": file_id,
     }
-    logger.info(f"Enqueueing message for button {button_id}: {message_data}")
-    message_queue.enqueue(button_id, message_data)
-
-    # cancel reminder if running
+   # ... (media_type और file_id सेट करने के बाद)
+    logger.info(f"Adding message to SQLite for button {button_id}")
+    await db_execute(
+        "INSERT INTO messages (button_id, content, media_type, file_id) VALUES (?, ?, ?, ?)",
+        (button_id, content, media_type, file_id)
+    )
+    
+    # आप चाहें तो एक्शन को यहाँ क्लियर कर सकते हैं या यूजर को और मैसेज जोड़ने दे सकते हैं
+    pending_count_rows = await db_fetchall("SELECT COUNT(*) FROM messages WHERE button_id=? AND status='pending'", (button_id,))
+    pending_count = pending_count_rows[0][0]
+    # --- मौजूदा रिमाइंडर को रद्द करें क्योंकि अब क्यू खाली नहीं है ---
     jobs = context.job_queue.get_jobs_by_name(f"empty_notify_{button_id}")
     for j in jobs:
         j.schedule_removal()
+        print(f"DEBUG: Removed empty queue reminder for {button_id} as a new message was added.")
+    # -------------------------------------------------------------
+    await update.message.reply_text(f"✅ मीडिया मैसेज जोड़ा गया! (कुल पेंडिंग: {pending_count})")
 
-    await update.message.reply_text(f"✅ मैसेज जोड़ा गया, कुल: {message_data}")
 
-
-@owner_only
 @owner_only
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.user_data.get("action")
@@ -862,18 +882,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not content:
             await update.message.reply_text("⚠️ संदेश खाली है!")
             return
-
-        message_data = {
-            "content": content,
-            "media_type": "text",
-            "file_id": None,
-        }
-        message_queue.enqueue(button_id, message_data)
         
-        # आप चाहें तो एक्शन को यहाँ क्लियर कर सकते हैं या यूजर को और मैसेज जोड़ने दे सकते हैं
-        # context.user_data.pop("action", None) 
-        
-        await update.message.reply_text(f"✅ टेक्स्ट मैसेज जोड़ा गया! (कुल पेंडिंग: {message_queue.queue_size(button_id)})")
+        logger.info(f"Adding text message to SQLite for button {button_id}")
+        await db_execute(
+            "INSERT INTO messages (button_id, content, media_type, file_id) VALUES (?, ?, ?, ?)",
+            (button_id, content, 'text', None)
+        )
+    
+        pending_count_rows = await db_fetchall("SELECT COUNT(*) FROM messages WHERE button_id=? AND status='pending'", (button_id,))
+        pending_count = pending_count_rows[0][0]
+        # --- मौजूदा रिमाइंडर को रद्द करें क्योंकि अब क्यू खाली नहीं है ---
+        jobs = context.job_queue.get_jobs_by_name(f"empty_notify_{button_id}")
+        for j in jobs:
+            j.schedule_removal()
+            print(f"DEBUG: Removed empty queue reminder for {button_id} as a new message was added.")
+        # -------------------------------------------------------------
+        await update.message.reply_text(f"✅ टेक्स्ट मैसेज जोड़ा गया! (कुल पेंडिंग: {pending_count})")
 
 
 
@@ -917,23 +941,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 # =====================
 def main() -> None:
     init_db()
-    # 1. Redis से कनेक्ट करें
-    try:
-        REDIS_URL = os.environ.get("REDIS_URL")
-         # --- यह नई लाइन जोड़ें ---
-        print(f"--- DEBUG: बॉट इस REDIS_URL का उपयोग कर रहा है: {REDIS_URL} ---")
-        # -------------------------
-        redis_client = setup_redis_connection(REDIS_URL)
-    except Exception as e:
-        logger.critical(f"Could not connect to Redis. Bot is shutting down. Error: {e}")
-        return # Redis के बिना बॉट नहीं चलेगा
-
-    # 2. MessageQueue को Redis क्लाइंट के साथ बनाएं
-    global message_queue
-    message_queue = MessageQueue(redis_client)
-    # --- बदलाव समाप्त ---
-
-    
     app = Application.builder().token(TOKEN).pool_timeout(60).connect_timeout(60).read_timeout(60).build()
 
     # UI handlers
