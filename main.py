@@ -174,30 +174,40 @@ async def db_execute(query: str, params=()):
 
     await loop.run_in_executor(None, _do)
 # =====================
-# =====================
-# Redis Connection Manager (यह अंतिम और सही संस्करण है)
+# Redis Connection Manager (अंतिम और सबसे स्पष्ट संस्करण)
 # =====================
 def setup_redis_connection(redis_url: str, max_retries=5):
     """
-    from_url का उपयोग करके एक मजबूत, SSL-सक्षम कनेक्शन बनाता है।
-    यह rediss:// URL को अपने आप हैंडल करता है।
+    अंतिम प्रयास: 'rediss://' स्कीम को बदलकर SSL को मैन्युअल रूप से फोर्स करता है।
+    यह कुछ दुर्लभ एनवायरनमेंट में SSL हैंडलर की समस्याओं को बायपास कर सकता है।
     """
     if not redis_url:
         raise ValueError("REDIS_URL एनवायरनमेंट वेरिएबल सेट होना चाहिए।")
 
-    print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (from_url मोड)...")
-    
+    # --- यह महत्वपूर्ण तरकीब है ---
+    # हम URL को 'rediss://' से 'redis://' में बदल रहे हैं।
+    # यह from_url को उसके डिफ़ॉल्ट SSL लॉजिक का उपयोग करने से रोकता है।
+    if redis_url.startswith("rediss://"):
+        modified_url = redis_url.replace("rediss://", "redis://", 1)
+        print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (मैन्युअल SSL ओवरराइड मोड)...")
+    else:
+        modified_url = redis_url
+        print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (स्टैंडर्ड मोड)...")
+
+    # अब, हम from_url को SSL का उपयोग करने के लिए ज़बरदस्ती करेंगे।
     redis_kwargs = {
-        'ssl_cert_reqs': None,
+        'ssl': True,  # <- SSL को स्पष्ट रूप से सक्षम करें
+        'ssl_cert_reqs': None, # <- सर्टिफिकेट की जाँच न करें
         'decode_responses': False
     }
 
     retry_wait = 2
     for attempt in range(max_retries):
         try:
-            redis_client = redis.from_url(redis_url, **redis_kwargs)
+            # बदले हुए URL का उपयोग करें, लेकिन उस पर SSL को फोर्स करें
+            redis_client = redis.from_url(modified_url, **redis_kwargs)
             redis_client.ping()
-            print("✅ Redis कनेक्शन सफल!")
+            print("✅✅✅ Redis कनेक्शन सफल! ✅✅✅")
             return redis_client
         except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
             print(f"⚠️ Redis कनेक्शन प्रयास {attempt + 1}/{max_retries} विफल: {e}")
@@ -210,6 +220,8 @@ def setup_redis_connection(redis_url: str, max_retries=5):
         except Exception as e:
             print(f"❌ Redis कनेक्शन सेटअप करते समय एक अप्रत्याशित त्रुटि हुई: {e}")
             raise
+
+
 
 # =====================
 # Utils
