@@ -103,32 +103,7 @@ class MessageQueue:
         self.redis_client = redis.from_url(redis_url, decode_responses=False)
 
 
-    def enqueue(self, button_id: str, message_data: dict):
-        """
-        Add a message to queue: lpush (left push), we will pop from right for FIFO.
-        """
-        key = f"queue:{button_id}"
-        self.redis_client.lpush(key, pickle.dumps(message_data))
-
-    def dequeue_batch(self, button_id: str, batch_size: int) -> List[dict]:
-        """
-        Pop up to batch_size messages in FIFO order from Redis.
-        We'll use rpop repeatedly because we did lpush to keep FIFO.
-        """
-        key = f"queue:{button_id}"
-        messages = []
-        for _ in range(batch_size):
-            raw = self.redis_client.rpop(key)
-            if not raw:
-                break
-            messages.append(pickle.loads(raw))
-        return messages
-
-    def queue_size(self, button_id: str) -> int:
-        key = f"queue:{button_id}"
-        return int(self.redis_client.llen(key))
-
-
+ 
 # =====================
 # SQLite only for Metadata (channels, schedules, users)
 # =====================
@@ -942,6 +917,9 @@ def main() -> None:
     # 1. Redis से कनेक्ट करें
     try:
         REDIS_URL = os.environ.get("REDIS_URL")
+         # --- यह नई लाइन जोड़ें ---
+        print(f"--- DEBUG: बॉट इस REDIS_URL का उपयोग कर रहा है: {REDIS_URL} ---")
+        # -------------------------
         redis_client = setup_redis_connection(REDIS_URL)
     except Exception as e:
         logger.critical(f"Could not connect to Redis. Bot is shutting down. Error: {e}")
