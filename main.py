@@ -30,6 +30,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+try:
+    IST = pytz.timezone('Asia/Kolkata')
+except pytz.UnknownTimeZoneError:
+    logger.error("Could not load timezone 'Asia/Kolkata'. Please check pytz installation.")
+    # आप चाहें तो बॉट को यहाँ बंद कर सकते हैं या एक डिफ़ॉल्ट टाइमज़ोन का उपयोग कर सकते हैं
+    IST = None 
+
 # =====================
 # Config
 # =====================
@@ -177,52 +184,7 @@ async def db_execute(query: str, params=()):
         conn.close()
 
     await loop.run_in_executor(None, _do)
-# =====================
-# Redis Connection Manager (अंतिम और अचूक संस्करण)
-# =====================
-def setup_redis_connection(redis_url: str, max_retries=5):
-    """
-    एक कस्टम SSL Connection Pool का उपयोग करके कनेक्शन बनाता है।
-    यह redis-py को SSL का उपयोग करने के लिए मजबूर करने का सबसे स्पष्ट तरीका है।
-    """
-    if not redis_url:
-        raise ValueError("REDIS_URL एनवायरनमेंट वेरिएबल सेट होना चाहिए।")
 
-    print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (SSL Connection Pool मोड)...")
-    url = urlparse(redis_url)
-
-    retry_wait = 2
-    for attempt in range(max_retries):
-        try:
-            # सीधे SSLConnection के साथ एक कनेक्शन पूल बनाएं
-            pool = redis.ConnectionPool(
-                host=url.hostname,
-                port=url.port,
-                password=url.password,
-                connection_class=SSLConnection, # <- यह लाइन redis-py को SSL का उपयोग करने के लिए मजबूर करती है
-                ssl_cert_reqs=None,
-                decode_responses=False
-            )
-            # उस पूल का उपयोग करके एक Redis क्लाइंट बनाएं
-            redis_client = redis.Redis(connection_pool=pool)
-            redis_client.ping()
-            print("✅✅✅ Redis कनेक्शन अंततः सफल! ✅✅✅")
-            return redis_client
-        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
-            print(f"⚠️ Redis कनेक्शन प्रयास {attempt + 1}/{max_retries} विफल: {e}")
-            if attempt < max_retries - 1:
-                print(f"{retry_wait} सेकंड में फिर से प्रयास किया जा रहा है...")
-                time.sleep(retry_wait)
-                retry_wait = min(retry_wait * 2, 30)
-            else:
-                raise ConnectionError(f"❌ कई प्रयासों के बाद Redis से कनेक्ट करने में विफल: {e}")
-        except Exception as e:
-            print(f"❌ Redis कनेक्शन सेटअप करते समय एक अप्रत्याशित त्रुटि हुई: {e}")
-            raise
-
-
-
-# =====================
 # Utils
 # =====================
 def is_valid_time_str(s: str) -> bool:
@@ -560,6 +522,9 @@ async def set_times_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 @owner_only
 async def start_forwarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # start_forwarding फ़ंक्शन में
+    when = dtime(hour=h, minute=m, tzinfo=IST) 
+
     query = update.callback_query
     await query.answer()
     button_id = query.data.split("_")[-1]
