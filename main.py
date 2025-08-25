@@ -10,6 +10,7 @@ import json
 import httpx
 import time
 import ssl
+from redis.connection import SSLConnection
 from functools import wraps
 from datetime import datetime, time as dtime
 from typing import List
@@ -174,40 +175,35 @@ async def db_execute(query: str, params=()):
 
     await loop.run_in_executor(None, _do)
 # =====================
-# Redis Connection Manager (अंतिम और सबसे स्पष्ट संस्करण)
+# Redis Connection Manager (अंतिम और अचूक संस्करण)
 # =====================
 def setup_redis_connection(redis_url: str, max_retries=5):
     """
-    अंतिम प्रयास: 'rediss://' स्कीम को बदलकर SSL को मैन्युअल रूप से फोर्स करता है।
-    यह कुछ दुर्लभ एनवायरनमेंट में SSL हैंडलर की समस्याओं को बायपास कर सकता है।
+    एक कस्टम SSL Connection Pool का उपयोग करके कनेक्शन बनाता है।
+    यह redis-py को SSL का उपयोग करने के लिए मजबूर करने का सबसे स्पष्ट तरीका है।
     """
     if not redis_url:
         raise ValueError("REDIS_URL एनवायरनमेंट वेरिएबल सेट होना चाहिए।")
 
-    # --- यह महत्वपूर्ण तरकीब है ---
-    # हम URL को 'rediss://' से 'redis://' में बदल रहे हैं।
-    # यह from_url को उसके डिफ़ॉल्ट SSL लॉजिक का उपयोग करने से रोकता है।
-    if redis_url.startswith("rediss://"):
-        modified_url = redis_url.replace("rediss://", "redis://", 1)
-        print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (मैन्युअल SSL ओवरराइड मोड)...")
-    else:
-        modified_url = redis_url
-        print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (स्टैंडर्ड मोड)...")
-
-    # अब, हम from_url को SSL का उपयोग करने के लिए ज़बरदस्ती करेंगे।
-    redis_kwargs = {
-        'ssl': True,  # <- SSL को स्पष्ट रूप से सक्षम करें
-        'ssl_cert_reqs': None, # <- सर्टिफिकेट की जाँच न करें
-        'decode_responses': False
-    }
+    print("Redis से कनेक्ट करने का प्रयास किया जा रहा है (SSL Connection Pool मोड)...")
+    url = urlparse(redis_url)
 
     retry_wait = 2
     for attempt in range(max_retries):
         try:
-            # बदले हुए URL का उपयोग करें, लेकिन उस पर SSL को फोर्स करें
-            redis_client = redis.from_url(modified_url, **redis_kwargs)
+            # सीधे SSLConnection के साथ एक कनेक्शन पूल बनाएं
+            pool = redis.ConnectionPool(
+                host=url.hostname,
+                port=url.port,
+                password=url.password,
+                connection_class=SSLConnection, # <- यह लाइन redis-py को SSL का उपयोग करने के लिए मजबूर करती है
+                ssl_cert_reqs=None,
+                decode_responses=False
+            )
+            # उस पूल का उपयोग करके एक Redis क्लाइंट बनाएं
+            redis_client = redis.Redis(connection_pool=pool)
             redis_client.ping()
-            print("✅✅✅ Redis कनेक्शन सफल! ✅✅✅")
+            print("✅✅✅ Redis कनेक्शन अंततः सफल! ✅✅✅")
             return redis_client
         except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
             print(f"⚠️ Redis कनेक्शन प्रयास {attempt + 1}/{max_retries} विफल: {e}")
