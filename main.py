@@ -539,32 +539,32 @@ async def start_forwarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     for job in all_jobs:
         if job.name and job.name.startswith(f"job_{button_id}_"):
             job.schedule_removal()
-
-   # ... (for job in all_jobs: ... के बाद)
-created = 0
-for t in times:
-    try:
-        h, m = map(int, t.split(":"))
-        when = dtime(hour=h, minute=m, tzinfo=IST)
-        
-        context.job_queue.run_daily(
-            forward_messages_job,
-            time=when,
-            name=f"job_{button_id}_{t}",
-            data={"button_id": button_id, "notify_chat_id": query.message.chat_id, "time": t},
-            job_kwargs={'misfire_grace_time': 300} 
-        )
-        created += 1
-    except (ValueError, IndexError):
-        logger.warning(f"Invalid time format found: {t}. Skipping.")
-        continue # अगर टाइम फॉर्मेट गलत है तो अगले पर जाएं
-# ... (for लूप के बाद)
-
-    if created > 0:
-        await query.edit_message_text(f"✅ फॉरवर्डिंग शुरू! {created} टाइम्स पर मैसेज भेजे जाएंगे।")
-    else:
-        await query.edit_message_text("❌ कोई भी वैध टाइम शेड्यूल नहीं किया जा सका। कृपया सही HH:MM फॉर्मेट में टाइम भेजें।")
-
+    
+       # ... (for job in all_jobs: ... के बाद)
+    created = 0
+    for t in times:
+        try:
+            h, m = map(int, t.split(":"))
+            when = dtime(hour=h, minute=m, tzinfo=IST)
+            
+            context.job_queue.run_daily(
+                forward_messages_job,
+                time=when,
+                name=f"job_{button_id}_{t}",
+                data={"button_id": button_id, "notify_chat_id": query.message.chat_id, "time": t},
+                job_kwargs={'misfire_grace_time': 300} 
+            )
+            created += 1
+        except (ValueError, IndexError):
+            logger.warning(f"Invalid time format found: {t}. Skipping.")
+            continue # अगर टाइम फॉर्मेट गलत है तो अगले पर जाएं
+    # ... (for लूप के बाद)
+    
+        if created > 0:
+            await query.edit_message_text(f"✅ फॉरवर्डिंग शुरू! {created} टाइम्स पर मैसेज भेजे जाएंगे।")
+        else:
+            await query.edit_message_text("❌ कोई भी वैध टाइम शेड्यूल नहीं किया जा सका। कृपया सही HH:MM फॉर्मेट में टाइम भेजें।")
+    
 
 
 
