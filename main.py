@@ -129,9 +129,6 @@ class MessageQueue:
         return int(self.redis_client.llen(key))
 
 
-message_queue = MessageQueue()
-
-
 # =====================
 # SQLite only for Metadata (channels, schedules, users)
 # =====================
