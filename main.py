@@ -12,7 +12,7 @@ import time
 from functools import wraps
 from datetime import datetime, time as dtime
 from typing import List
-
+from urllib.parse import urlparse
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, error
 from telegram.ext import (
     Application,
