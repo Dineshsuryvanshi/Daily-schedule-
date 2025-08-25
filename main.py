@@ -558,10 +558,12 @@ for t in times:
     except (ValueError, IndexError):
         logger.warning(f"Invalid time format found: {t}. Skipping.")
         continue # अगर टाइम फॉर्मेट गलत है तो अगले पर जाएं
-if created > 0:
-    await query.edit_message_text(f"✅ फॉरवर्डिंग शुरू! {created} टाइम्स पर मैसेज भेजे जाएंगे।")
-else:
-    await query.edit_message_text("❌ कोई भी वैध टाइम शेड्यूल नहीं किया जा सका।")
+# ... (for लूप के बाद)
+
+    if created > 0:
+        await query.edit_message_text(f"✅ फॉरवर्डिंग शुरू! {created} टाइम्स पर मैसेज भेजे जाएंगे।")
+    else:
+        await query.edit_message_text("❌ कोई भी वैध टाइम शेड्यूल नहीं किया जा सका। कृपया सही HH:MM फॉर्मेट में टाइम भेजें।")
 
 
 
