@@ -438,12 +438,12 @@ async def open_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await query.answer()
     button_id = query.data  # e.g., 'btn1'
     keyboard = [
-        [InlineKeyboardButton("चैनल जोड़ें", callback_data=f"add_chn_{button_id}")],
-        [InlineKeyboardButton("चैनल हटाएं", callback_data=f"del_chn_{button_id}")],
-        [InlineKeyboardButton("मैसेज जोड़ें", callback_data=f"add_msg_{button_id}")],
-        [InlineKeyboardButton("टाइम सेट करें", callback_data=f"set_time_{button_id}")],
-        [InlineKeyboardButton("फॉरवर्डिंग शुरू करें", callback_data=f"start_fw_{button_id}")],
-        [InlineKeyboardButton("स्टेटस देखें", callback_data=f"status_{button_id}")],
+        [InlineKeyboardButton("➕चैनल जोड़ें➕", callback_data=f"add_chn_{button_id}")],
+        [InlineKeyboardButton("💢चैनल हटाएं💢", callback_data=f"del_chn_{button_id}")],
+        [InlineKeyboardButton("💌मैसेज जोड़ें💌", callback_data=f"add_msg_{button_id}")],
+        [InlineKeyboardButton("🕕टाइम सेट करें🕛", callback_data=f"set_time_{button_id}")],
+        [InlineKeyboardButton("➰फॉरवर्डिंग शुरू करें➰", callback_data=f"start_fw_{button_id}")],
+        [InlineKeyboardButton("✔स्टेटस देखें🎦", callback_data=f"status_{button_id}")],
     ]
     # status text (async)
     status_text = await get_button_status(button_id)
@@ -475,7 +475,7 @@ async def delete_channel_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard: List[List[InlineKeyboardButton]] = []
     for ch in channels:
         keyboard.append([InlineKeyboardButton(f"{ch}", callback_data=f"confirm_del_{button_id}_{ch}")])
-    keyboard.append([InlineKeyboardButton(" वापस", callback_data=f"{button_id}")])
+    keyboard.append([InlineKeyboardButton(" 🔙वापस", callback_data=f"{button_id}")])
 
     await query.edit_message_text("निम्नलिखित चैनल्स में से हटाने के लिए चुनें:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -510,7 +510,7 @@ async def add_messages_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     button_id = query.data.split("_")[-1]
     context.user_data["action"] = f"add_messages_{button_id}"
-    await query.edit_message_text("मैसेज भेजें (टेक्स्ट/फोटो/डॉक्युमेंट/वीडियो). फोटो/डॉक्युमेंट के साथ कैप्शन भी भेज सकते हैं:")
+    await query.edit_message_text("🔜मैसेज भेजें (टेक्स्ट/फोटो/डॉक्युमेंट/वीडियो). फोटो/डॉक्युमेंट के साथ कैप्शन भी भेज सकते हैं:")
 
 @owner_only
 async def set_times_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -523,7 +523,6 @@ async def set_times_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 @owner_only
 async def start_forwarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # start_forwarding फ़ंक्शन में
-    when = dtime(hour=h, minute=m, tzinfo=IST) 
 
     query = update.callback_query
     await query.answer()
@@ -541,19 +540,31 @@ async def start_forwarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if job.name and job.name.startswith(f"job_{button_id}_"):
             job.schedule_removal()
 
-    created = 0
-    for t in times:
+   # ... (for job in all_jobs: ... के बाद)
+created = 0
+for t in times:
+    try:
         h, m = map(int, t.split(":"))
         when = dtime(hour=h, minute=m, tzinfo=IST)
+        
         context.job_queue.run_daily(
             forward_messages_job,
             time=when,
             name=f"job_{button_id}_{t}",
             data={"button_id": button_id, "notify_chat_id": query.message.chat_id, "time": t},
-            job_kwargs={'misfire_grace_time': 300}  # यह लाइन शायद गलत इंडेंट है
-            )
-        created += 1 # यह लाइन भी गलत इंडेंट हो सकती है
-    await query.edit_message_text(f"✅ फॉरवर्डिंग शुरू! {created} टाइम्स पर मैसेज भेजे जाएंगे")
+            job_kwargs={'misfire_grace_time': 300} 
+        )
+        created += 1
+    except (ValueError, IndexError):
+        logger.warning(f"Invalid time format found: {t}. Skipping.")
+        continue # अगर टाइम फॉर्मेट गलत है तो अगले पर जाएं
+
+if created > 0:
+    await query.edit_message_text(f"✅ फॉरवर्डिंग शुरू! {created} टाइम्स पर मैसेज भेजे जाएंगे।")
+else:
+    await query.edit_message_text("❌ कोई भी वैध टाइम शेड्यूल नहीं किया जा सका।")
+
+
 
 
 # =====================
