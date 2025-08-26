@@ -168,8 +168,6 @@ def is_valid_time_str(s: str) -> bool:
     except Exception:
         return False
 
-
-
 def owner_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user = getattr(update, 'effective_user', None)
@@ -179,30 +177,13 @@ def owner_only(func):
             return
 
         if user.id != OWNER_ID:
-            # --- अनधिकृत पहुंच का प्रयास ---
             print(f"Unauthorized access attempt by user {user.id} ({user.username or 'N/A'}).")
             
-            # उपयोगकर्ता को संदेश भेजें
-            if update.effective_message:
-                await update.effectivdef owner_only(func):
-    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        user = getattr(update, 'effective_user', None)
-        
-        if not user:
-            print("DEBUG: Update received without a user. Ignoring.")
-            return
-
-        if user.id != OWNER_ID:
-            # --- अनधिकृत पहुंच का प्रयास ---
-            print(f"Unauthorized access attempt by user {user.id} ({user.username or 'N/A'}).")
-            
-            # उपयोगकर्ता को संदेश भेजें
             if update.effective_message:
                 await update.effective_message.reply_text(
                     "❌ आप इस बॉट को use नहीं कर सकते!\nकृपया Owner से contact करें।"
                 )
             
-            # एडमिन को सूचना भेजें
             alert_message = (
                 f"⚠️ *अनधिकृत पहुंच का प्रयास* ⚠️\n\n"
                 f"*User ID:* `{user.id}`\n"
@@ -218,40 +199,12 @@ def owner_only(func):
                     )
                 except Exception as e:
                     logger.error(f"Failed to send unauthorized access alert to admin {admin_id}: {e}")
-            # --------------------------------
-
-            return # फंक्शन को आगे न चलाएं
-
-        # अगर यूजर ओनर है, तो ही असली फंक्शन चलाएं
-        return await func(update, context, *args, **kwargs)
-    return wrapper
-e_message.reply_text(
-                    "❌ आप इस बॉट को use नहीं कर सकते!\nकृपया Owner से contact करें।"
-                )
             
-            # एडमिन को सूचना भेजें
-            alert_message = (
-                f"⚠️ *अनधिकृत पहुंच का प्रयास* ⚠️\n\n"
-                f"*User ID:* `{user.id}`\n"
-                f"*Username:* @{user.username or 'N/A'}\n"
-                f"*First Name:* {user.first_name}"
-            )
-            for admin_id in ADMIN_IDS:
-                try:
-                    await context.bot.send_message(
-                        chat_id=admin_id,
-                        text=alert_message,
-                        parse_mode='Markdown'
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to send unauthorized access alert to admin {admin_id}: {e}")
-            # --------------------------------
+            return
 
-            return # फंक्शन को आगे न चलाएं
-
-        # अगर यूजर ओनर है, तो ही असली फंक्शन चलाएं
         return await func(update, context, *args, **kwargs)
     return wrapper
+
 
 
 # =====================
@@ -495,8 +448,10 @@ async def add_channels_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     # --------
-    await query.edit_message_text("चैनल ID भेजें (एक लाइन में एक, @channel या -100... फॉर्मेट):")
-
+    await query.edit_message_text(
+        "चैनल ID भेजें (एक लाइन में एक, @channel या -100... फॉर्मेट):",
+        reply_markup=reply_markup  # <--- इसे यहाँ जोड़ें
+    )
 @owner_only
 async def delete_channel_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
