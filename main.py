@@ -41,7 +41,7 @@ except pytz.UnknownTimeZoneError:
 # Config
 # =====================
 # नया और सुरक्षित तरीका
-TOKEN = "8321548453:AAFIwK0EmuSirYn8HHd2Yr0vKMgZdyRHwXo"  # अपना बॉट टोकन डालें
+TOKEN = "8321548453:AAGcbJl0r6lu5Lmbv3RT8VuDcU2wV3eXH34"  # अपना बॉट टोकन डालें
 ADMIN_IDS = [5865209445]           # अपने Telegram User IDs
 OWNER_ID = 5865209445  # अपना ID
 
