@@ -7,6 +7,8 @@ import os
 import json
 import httpx
 import time
+from dotenv import load_dotenv
+load_dotenv()
 from functools import wraps
 from datetime import datetime, time as dtime
 from typing import List
