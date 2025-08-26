@@ -43,9 +43,9 @@ except pytz.UnknownTimeZoneError:
 # Config
 # =====================
 # नया और सुरक्षित तरीका
-TOKEN = os.environ.get("BOT_TOKEN")
-OWNER_ID = int(os.environ.get("OWNER_ID", 0))
-ADMIN_IDS = [int(admin_id) for admin_id in os.environ.get("ADMIN_IDS", "").split(',') if admin_id]
+TOKEN = "8321548453:AAFIwK0EmuSirYn8HHd2Yr0vKMgZdyRHwXo"  # अपना बॉट टोकन डालें
+ADMIN_IDS = [5865209445]           # अपने Telegram User IDs
+OWNER_ID = 5865209445  # अपना ID
 
 # अगर TOKEN या OWNER_ID नहीं मिला तो बॉट को क्रैश कर दें
 if not TOKEN or not OWNER_ID:
