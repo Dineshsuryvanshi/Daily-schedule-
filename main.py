@@ -544,12 +544,12 @@ async def start_forwarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     rows = await db_fetchall("SELECT schedule_time FROM schedules WHERE button_id=?", (button_id,))
     times = [r[0] for r in rows]
     if not times:
-        # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
-    keyboard = [
-        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    # --------
+            # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+        keyboard = [
+            [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        # --------
         await query.edit_message_text("❌ पहले टाइम सेट करें!")
         return
 
@@ -581,11 +581,11 @@ async def start_forwarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
         if created > 0:
             # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
-    keyboard = [
-        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    # --------
+        keyboard = [
+            [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        # --------
             await query.edit_message_text(f"✅ फॉरवर्डिंग शुरू! {created} टाइम्स पर मैसेज भेजे जाएंगे।")
         else:
             await query.edit_message_text("❌ कोई भी वैध टाइम शेड्यूल नहीं किया जा सका। कृपया सही HH:MM फॉर्मेट में टाइम भेजें।")
