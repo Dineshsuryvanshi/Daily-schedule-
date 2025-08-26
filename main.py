@@ -49,6 +49,17 @@ OWNER_ID = 5865209445  # अपना ID
 if not TOKEN or not OWNER_ID:
     raise ValueError("BOT_TOKEN and OWNER_ID environment variables must be set.")
 
+# =====================
+# Button Mappings
+# =====================
+BUTTON_MAP = {
+    "us_button": "👉 US",
+    "ios_button": "👉 IOS",
+    "sfb_button": "👉 SFB",
+    "personal_button": "👉 personal",
+    "extra_button_5": "बटन 5"
+}
+
 
 MAX_CHANNELS_PER_BUTTON = 20
 MAX_TIMES_PER_BUTTON = 11
@@ -256,7 +267,8 @@ async def get_button_status(button_id: str) -> str:
     # ----------------------------------------------
 
     status = []
-    status.append(f"बटन {button_id} स्टेटस:")
+    button_name = BUTTON_MAP.get(button_id, button_id)
+    status.append(f"बटन '{button_name}' का स्टेटस:")
     status.append("")
     status.append(f"चैनल्स: {len(channels)}")
     status.append(f"पेंडिंग मैसेजेस: {pending}")
@@ -331,10 +343,12 @@ async def empty_queue_reminder(context: ContextTypes.DEFAULT_TYPE):
         pending_count = pending_rows[0][0] if pending_rows else 0
 
         if pending_count == 0:
+            button_name = BUTTON_MAP.get(button_id, button_id)
             await context.bot.send_message(
                 notify_chat_id,
-                f"⏰ रिमाइंडर: बटन {button_id} की मैसेज क्यू अब भी खाली है। कृपया नए मैसेज जोड़ें।"
+                f"⏰ रिमाइंडर: बटन '{button_name}' की मैसेज क्यू अब भी खाली है। कृपया नए मैसेज जोड़ें।"
             )
+
         else:
             # अगर क्यू खाली नहीं है, तो इस रिमाइंडर जॉब को हटा दें
             context.job.schedule_removal()
@@ -376,8 +390,9 @@ async def forward_messages_job(context: ContextTypes.DEFAULT_TYPE):
         # --- यहाँ रिमाइंडर लॉजिक जोड़ें (जब कोई संदेश न मिले) ---
         if not messages_rows:
             if notify_chat_id:
-                await context.bot.send_message(notify_chat_id, f"ℹ️ {button_id}: भेजने के लिए कोई पेंडिंग मैसेज नहीं है।")
-            
+                button_name = BUTTON_MAP.get(button_id, button_id) # बटन का नाम प्राप्त करें
+                await context.bot.send_message(notify_chat_id, f"ℹ️ बटन '{button_name}' में भेजने के लिए कोई पेंडिंग मैसेज नहीं है।")
+
             # अगर पहले से कोई रिमाइंडर जॉब नहीं चल रही है, तो नई जॉब बनाएं
             if notify_chat_id and not context.job_queue.get_jobs_by_name(f"empty_notify_{button_id}"):
                 print(f"DEBUG: Queue for {button_id} is empty. Scheduling 5-minute reminder.")
@@ -410,7 +425,8 @@ async def forward_messages_job(context: ContextTypes.DEFAULT_TYPE):
 
         # 5. सफलता का अलर्ट भेजें
         if notify_chat_id:
-            await context.bot.send_message(notify_chat_id, f"✅ {button_id}: {sent_count} मैसेज सफलतापूर्वक फॉरवर्ड कर दिए गए।")
+            button_name = BUTTON_MAP.get(button_id, button_id)
+            await context.bot.send_message(notify_chat_id, f"✅ बटन '{button_name}': {sent_count} मैसेज सफलतापूर्वक फॉरवर्ड कर दिए गए।")
 
         # --- यहाँ रिमाइंडर लॉजिक जोड़ें (जब संदेश भेजने के बाद क्यू खाली हो जाए) ---
         remaining_rows = await db_fetchall("SELECT COUNT(*) FROM messages WHERE button_id=? AND status='pending'", (button_id,))
@@ -440,16 +456,15 @@ async def forward_messages_job(context: ContextTypes.DEFAULT_TYPE):
 # =====================
 # Bot UI Handlers
 # =====================
+
 @owner_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
-        [InlineKeyboardButton("👉 US", callback_data="btn1")],
-        [InlineKeyboardButton("👉 IOS", callback_data="btn2")],
-        [InlineKeyboardButton("👉 SFB", callback_data="btn3")],
-        [InlineKeyboardButton("👉 personal ", callback_data="btn4")],
-        [InlineKeyboardButton("बटन 5", callback_data="btn5")],
+        [InlineKeyboardButton(display_name, callback_data=button_id)]
+        for button_id, display_name in BUTTON_MAP.items()
     ]
     await update.message.reply_text("मुख्य मेनू:", reply_markup=InlineKeyboardMarkup(keyboard))
+
 
 @owner_only
 async def open_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1001,7 +1016,9 @@ def main() -> None:
 
     # UI handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(open_button, pattern=r"^btn[1-5]$"))
+    # सभी बटन IDs को एक साथ जोड़कर एक पैटर्न बनाएं
+    button_patterns = "|".join(BUTTON_MAP.keys())
+    app.add_handler(CallbackQueryHandler(open_button, pattern=f"^({button_patterns})$"))
     app.add_handler(CallbackQueryHandler(add_channels_prompt, pattern=r"^add_chn_"))
     app.add_handler(CallbackQueryHandler(delete_channel_menu, pattern=r"^del_chn_"))
     app.add_handler(CallbackQueryHandler(confirm_delete_channel, pattern=r"^confirm_del_"))
