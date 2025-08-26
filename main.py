@@ -56,46 +56,6 @@ BATCH_SIZE = 30
 
 DB_NAME = "bot_data.db"
 
-class MessageQueue:
-    def __init__(self, redis_client):
-        """
-        Accepts an already connected redis client.
-        """
-        self.redis_client = redis_client
-
-    def enqueue(self, button_id: str, message_data: dict):
-        """
-        Add a message to queue: lpush (left push), we will pop from right for FIFO.
-        """
-        key = f"queue:{button_id}"
-        # हम pickle का उपयोग कर रहे हैं, इसलिए डेटा बाइनरी होना चाहिए
-        self.redis_client.lpush(key, pickle.dumps(message_data))
-
-    def dequeue_batch(self, button_id: str, batch_size: int) -> List[dict]:
-        """
-        Pop up to batch_size messages in FIFO order from Redis.
-        """
-        key = f"queue:{button_id}"
-        messages = []
-        for _ in range(batch_size):
-            raw = self.redis_client.rpop(key)
-            if not raw:
-                break
-            # बाइनरी डेटा को वापस ऑब्जेक्ट में बदलें
-            messages.append(pickle.loads(raw))
-        return messages
-
-    def queue_size(self, button_id: str) -> int:
-        key = f"queue:{button_id}"
-        return int(self.redis_client.llen(key))
-
-# अभी message_queue को यहां initialize न करें, हम इसे main() में करेंगे
-# message_queue = MessageQueue() <--- इस लाइन को भी हटाएं या कमेंट कर दें
-
-
-        
-        # URL से Redis क्लाइंट बनाएं (decode_responses को False रखें क्योंकि आप pickle का उपयोग कर रहे हैं)
-        self.redis_client = redis.from_url(redis_url, decode_responses=False)
 
 
  
@@ -201,27 +161,86 @@ def is_valid_time_str(s: str) -> bool:
 
 def owner_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        # सुरक्षित तरीके से यूजर की जाँच करें
         user = getattr(update, 'effective_user', None)
         
-        if not user or user.id != OWNER_ID:
-            # अगर कोई यूजर नहीं है, तो कुछ भी न करें
-            if not user:
-                print("DEBUG: Update received without a user. Ignoring.")
-                return
+        if not user:
+            print("DEBUG: Update received without a user. Ignoring.")
+            return
 
-            # अगर यूजर ओनर नहीं है, तो मैसेज भेजें
+        if user.id != OWNER_ID:
+            # --- अनधिकृत पहुंच का प्रयास ---
+            print(f"Unauthorized access attempt by user {user.id} ({user.username or 'N/A'}).")
+            
+            # उपयोगकर्ता को संदेश भेजें
+            if update.effective_message:
+                await update.effectivdef owner_only(func):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        user = getattr(update, 'effective_user', None)
+        
+        if not user:
+            print("DEBUG: Update received without a user. Ignoring.")
+            return
+
+        if user.id != OWNER_ID:
+            # --- अनधिकृत पहुंच का प्रयास ---
+            print(f"Unauthorized access attempt by user {user.id} ({user.username or 'N/A'}).")
+            
+            # उपयोगकर्ता को संदेश भेजें
             if update.effective_message:
                 await update.effective_message.reply_text(
                     "❌ आप इस बॉट को use नहीं कर सकते!\nकृपया Owner से contact करें।"
                 )
-            return
             
+            # एडमिन को सूचना भेजें
+            alert_message = (
+                f"⚠️ *अनधिकृत पहुंच का प्रयास* ⚠️\n\n"
+                f"*User ID:* `{user.id}`\n"
+                f"*Username:* @{user.username or 'N/A'}\n"
+                f"*First Name:* {user.first_name}"
+            )
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=alert_message,
+                        parse_mode='Markdown'
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send unauthorized access alert to admin {admin_id}: {e}")
+            # --------------------------------
+
+            return # फंक्शन को आगे न चलाएं
+
         # अगर यूजर ओनर है, तो ही असली फंक्शन चलाएं
         return await func(update, context, *args, **kwargs)
     return wrapper
+e_message.reply_text(
+                    "❌ आप इस बॉट को use नहीं कर सकते!\nकृपया Owner से contact करें।"
+                )
+            
+            # एडमिन को सूचना भेजें
+            alert_message = (
+                f"⚠️ *अनधिकृत पहुंच का प्रयास* ⚠️\n\n"
+                f"*User ID:* `{user.id}`\n"
+                f"*Username:* @{user.username or 'N/A'}\n"
+                f"*First Name:* {user.first_name}"
+            )
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=alert_message,
+                        parse_mode='Markdown'
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send unauthorized access alert to admin {admin_id}: {e}")
+            # --------------------------------
 
+            return # फंक्शन को आगे न चलाएं
 
+        # अगर यूजर ओनर है, तो ही असली फंक्शन चलाएं
+        return await func(update, context, *args, **kwargs)
+    return wrapper
 
 
 # =====================
@@ -455,6 +474,12 @@ async def add_channels_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     button_id = query.data.split("_")[-1]
     context.user_data["action"] = f"add_channels_{button_id}"
+    # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
     await query.edit_message_text("चैनल ID भेजें (एक लाइन में एक, @channel या -100... फॉर्मेट):")
 
 @owner_only
@@ -500,6 +525,12 @@ async def final_delete_channel(update: Update, context: ContextTypes.DEFAULT_TYP
     c.execute("DELETE FROM channels WHERE button_id=? AND channel_id=?", (button_id, channel))
     conn.commit()
     conn.close()
+    # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
 
     await query.edit_message_text(f"✅ चैनल {channel} सफलतापूर्वक हटाया गया")
 
@@ -510,6 +541,12 @@ async def add_messages_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     button_id = query.data.split("_")[-1]
     context.user_data["action"] = f"add_messages_{button_id}"
+    # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
     await query.edit_message_text("🔜मैसेज भेजें (टेक्स्ट/फोटो/डॉक्युमेंट/वीडियो). फोटो/डॉक्युमेंट के साथ कैप्शन भी भेज सकते हैं:")
 
 @owner_only
@@ -518,6 +555,12 @@ async def set_times_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.answer()
     button_id = query.data.split("_")[-1]
     context.user_data["action"] = f"set_times_{button_id}"
+    # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
     await query.edit_message_text("टाइम भेजें (HH:MM फॉर्मेट में, एक लाइन में एक):")
 
 @owner_only
@@ -531,6 +574,12 @@ async def start_forwarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     rows = await db_fetchall("SELECT schedule_time FROM schedules WHERE button_id=?", (button_id,))
     times = [r[0] for r in rows]
     if not times:
+        # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
         await query.edit_message_text("❌ पहले टाइम सेट करें!")
         return
 
@@ -561,6 +610,12 @@ async def start_forwarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # ... (for लूप के बाद)
     
         if created > 0:
+            # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
             await query.edit_message_text(f"✅ फॉरवर्डिंग शुरू! {created} टाइम्स पर मैसेज भेजे जाएंगे।")
         else:
             await query.edit_message_text("❌ कोई भी वैध टाइम शेड्यूल नहीं किया जा सका। कृपया सही HH:MM फॉर्मेट में टाइम भेजें।")
@@ -818,6 +873,12 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         j.schedule_removal()
         print(f"DEBUG: Removed empty queue reminder for {button_id} as a new message was added.")
     # -------------------------------------------------------------
+    # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
     await update.message.reply_text(f"✅ मीडिया मैसेज जोड़ा गया! (कुल पेंडिंग: {pending_count})")
 
 
@@ -837,6 +898,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await db_execute("INSERT INTO channels (button_id, channel_id) VALUES (?, ?)", (button_id, ch))
                 added += 1
         context.user_data.pop("action", None)
+        # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
         await update.message.reply_text(f"✅ {added} चैनल सफलतापूर्वक जोड़े गए!")
 
     # टाइम सेट करने का लॉजिक
@@ -847,9 +914,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await db_execute("DELETE FROM schedules WHERE button_id=?", (button_id,))
         for t in valid_times:
-            await db_execute("INSERT INTO schedules (button_id, schedule_time) VALUES (?, ?)", (button_id, t))
-            
+            await db_execute("INSERT INTO schedules (button_id, schedule_time) VALUES (?, ?)", (button_id, t))   
         context.user_data.pop("action", None)
+    # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
+    
         await update.message.reply_text(f"✅ {len(valid_times)} टाइम सेट किए गए!")
 
     # टेक्स्ट मैसेज जोड़ने का लॉजिक
@@ -873,7 +946,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for j in jobs:
             j.schedule_removal()
             print(f"DEBUG: Removed empty queue reminder for {button_id} as a new message was added.")
-        # -------------------------------------------------------------
+            # --- "वापस" बटन के लिए कीबोर्ड बनाएं ---
+    keyboard = [
+        [InlineKeyboardButton("🔙 वापस", callback_data=f"{button_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --------
+        # ------------------------------------------------------------
         await update.message.reply_text(f"✅ टेक्स्ट मैसेज जोड़ा गया! (कुल पेंडिंग: {pending_count})")
 
 
